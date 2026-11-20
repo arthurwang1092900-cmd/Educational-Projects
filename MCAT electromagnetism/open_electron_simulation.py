@@ -6,7 +6,7 @@ The simulation itself lives in the HTML file, so it runs fast and has
 clickable buttons and sliders.
 
 How to run (Anaconda Prompt):
-    cd C:\Users\arthu\Downloads
+    cd Downloads
     python open_electron_simulation.py
 
 Keep this file and electron_simulation.html in the SAME folder.
