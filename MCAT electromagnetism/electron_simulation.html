@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Electron in electric and magnetic fields (3D)</title>
+<style>
+:root{--bg:#ffffff;--panel:#f1efe8;--text:#1f1f1e;--text2:#5f5e5a;--border:#c9c7bf;--accent-bg:#e6f1fb;--accent-text:#0c447c;--accent-border:#85b7eb}
+@media (prefers-color-scheme: dark){:root{--bg:#1b1b1a;--panel:#262625;--text:#ececea;--text2:#a8a7a1;--border:#4a4a48;--accent-bg:#0b2540;--accent-text:#85b7eb;--accent-border:#185fa5}}
+body{margin:0;padding:16px;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:760px;margin:0 auto}
+h1{font-size:18px;font-weight:500;margin:0 0 12px}
+button{background:transparent;color:var(--text);border:0.5px solid var(--border);border-radius:8px;padding:7px 14px;font-size:14px;cursor:pointer;font-family:inherit}
+button:hover{border-color:var(--text2)}
+button:active{transform:scale(0.98)}
+input[type=range]{width:100%;accent-color:#378ADD}
+label{display:block;font-size:13px;color:var(--text2)}
+label span{color:var(--text)}
+canvas{width:100%;height:460px;display:block;touch-action:none;border-radius:12px;background:var(--panel);color:var(--text2);cursor:grab}
+.row{display:flex;gap:6px;flex-wrap:wrap}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text2);margin:8px 0}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 20px;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Electron in electric and magnetic fields (3D)</h1>
+<div class="row" style="margin-bottom:8px">
+<button data-p="vac">Vacuum</button><button data-p="e">E only</button><button data-p="b">B only</button><button data-p="eb">E + B</button>
+</div>
+<canvas id="cv"></canvas>
+<div class="legend">
+<span><b class="dot" style="background:#639922"></b>v velocity</span>
+<span><b class="dot" style="background:#E24B4A"></b>F force</span>
+<span><b class="dot" style="background:#378ADD"></b>E field</span>
+<span><b class="dot" style="background:#7F77DD"></b>B field</span>
+<span>Drag the picture to rotate it</span>
+</div>
+<div class="row" style="margin-bottom:10px">
+<button class="chip" data-k="E">E lines</button><button class="chip" data-k="B">B lines</button><button class="chip" data-k="V">v, F, E, B vectors</button><button class="chip" data-k="T">Trail</button>
+</div>
+<div class="grid">
+<label>External E: <span id="eo"></span><input type="range" id="e" min="0" max="3" step="0.1" value="1"></label>
+<label>External B: <span id="bo"></span><input type="range" id="b" min="0" max="3" step="0.1" value="1.5"></label>
+<label>Launch speed perpendicular to B: <span id="vpo"></span><input type="range" id="vp" min="0" max="2" step="0.1" value="0"></label>
+<label>Launch speed along B: <span id="vzo"></span><input type="range" id="vz" min="0" max="2" step="0.1" value="0"></label>
+</div>
+<div style="display:flex;align-items:center;gap:10px;margin-top:12px;font-size:13px;color:var(--text2)">
+<span style="white-space:nowrap">Slow-mo x<span id="spo" style="color:var(--text)"></span></span>
+<input type="range" id="sp" min="0.05" max="1.5" step="0.05" value="0.3" style="flex:1">
+</div>
+<div style="display:flex;align-items:center;gap:8px;margin-top:12px">
+<button id="play">Pause</button>
+<button id="rs">Reset</button>
+<span id="ro" style="font-size:12px;color:var(--text2);margin-left:auto"></span>
+</div>
+</div>
+<script>
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+const $=id=>document.getElementById(id);
+const val=id=>parseFloat($(id).value);
+let yaw=0.7,pitch=0.35,playing=true,show={E:true,B:true,V:true,T:true};
+let X=[0,0,0],V=[0,0,0],T=0,trail=[],tgt=[0,0,0],last=performance.now(),fc=0,W=0,H=0,S=50,dpr=1;
+const CE='#378ADD',CB='#7F77DD',CV='#639922',CF='#E24B4A',CT='#1D9E75';
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+const mul=(a,k)=>[a[0]*k,a[1]*k,a[2]*k];
+const len=a=>Math.hypot(a[0],a[1],a[2]);
+const dirs=[];for(let i=0;i<18;i++){const y=1-2*(i+.5)/18,r=Math.sqrt(1-y*y),ph=i*2.399963;dirs.push([r*Math.cos(ph),y,r*Math.sin(ph)])}
+function fields(){return{E:[val('e'),0,0],B:[0,0,val('b')]}}
+function force(){const f=fields();return mul(add(f.E,cross(V,f.B)),-1)}
+function reset(){X=[0,0,0];V=[0,val('vp'),val('vz')];T=0;trail=[];tgt=[0,0,0]}
+function step(dt){const f=fields();const h=mul(f.E,-dt/2);const vm=add(V,h);const t=mul(f.B,-dt/2);const t2=t[0]*t[0]+t[1]*t[1]+t[2]*t[2];const s=mul(t,2/(1+t2));const vp=add(vm,cross(vm,t));const vq=add(vm,cross(vp,s));V=add(vq,h);X=add(X,mul(V,dt));T+=dt}
+function rot(x,y,z){const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);const x1=x*cy+z*sy,z1=-x*sy+z*cy;return[x1,y*cp-z1*sp,y*sp+z1*cp]}
+function P(p){const r=rot(p[0]-tgt[0],p[1]-tgt[1],p[2]-tgt[2]);const k=9/(9-r[2]);return[W/2+r[0]*S*k,H/2-r[1]*S*k,k]}
+function seg(a,b,c,w,al){const p=P(a),q=P(b);ctx.globalAlpha=al;ctx.strokeStyle=c;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(p[0],p[1]);ctx.lineTo(q[0],q[1]);ctx.stroke()}
+function head(a,b,c,w,al,h){const p=P(a),q=P(b);const dx=q[0]-p[0],dy=q[1]-p[1],l=Math.hypot(dx,dy);if(l<3)return;const ux=dx/l,uy=dy/l;ctx.globalAlpha=al;ctx.strokeStyle=c;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(q[0]-ux*h-uy*h*.5,q[1]-uy*h+ux*h*.5);ctx.lineTo(q[0],q[1]);ctx.lineTo(q[0]-ux*h+uy*h*.5,q[1]-uy*h-ux*h*.5);ctx.stroke()}
+function arrow(a,b,c,w,al,h){seg(a,b,c,w,al);head(a,b,c,w,al,h||7)}
+function vec(d,L,c,lab){const l=len(d);if(l<1e-3||L<0.03)return;const tip=add(X,mul(d,L/l));arrow(X,tip,c,2.4,1,9);const p=P(tip);ctx.globalAlpha=1;ctx.fillStyle=c;ctx.font='500 13px sans-serif';ctx.fillText(lab,p[0]+7,p[1]-6)}
+function draw(){
+const r=cv.getBoundingClientRect();
+if(r.width!==W||r.height!==H){W=r.width;H=r.height;dpr=window.devicePixelRatio||1;cv.width=W*dpr;cv.height=H*dpr;S=Math.min(W,H)/6.2}
+ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);
+const tc=getComputedStyle(cv).color;const f=fields();const sp=1.6,L=3.4;
+if(show.E){
+dirs.forEach(d=>arrow(add(X,mul(d,1.4)),add(X,mul(d,0.3)),CE,1,0.7,6));
+if(f.E[0]>0.01){const cy0=Math.round(tgt[1]/sp),cz0=Math.round(tgt[2]/sp);
+for(let j=-1;j<=1;j++)for(let k=-1;k<=1;k++){const y=(cy0+j)*sp,z=(cz0+k)*sp;const a=Math.max(0,1-Math.hypot(y-tgt[1],z-tgt[2])/2.6)*0.7;if(a<0.04)continue;const w=0.8+f.E[0]*0.4;
+seg([tgt[0]-L,y,z],[tgt[0]+L,y,z],CE,w,a);
+for(let xi=Math.ceil((tgt[0]-L)/sp)*sp;xi<=tgt[0]+L;xi+=sp)head([xi-.5,y,z],[xi,y,z],CE,w,a,6)}}}
+if(show.B&&f.B[2]>0.01){const cx0=Math.round(tgt[0]/sp),cy1=Math.round(tgt[1]/sp);
+for(let j=-1;j<=1;j++)for(let k=-1;k<=1;k++){const x=(cx0+j)*sp,y=(cy1+k)*sp;const a=Math.max(0,1-Math.hypot(x-tgt[0],y-tgt[1])/2.6)*0.7;if(a<0.04)continue;const w=0.8+f.B[2]*0.4;
+seg([x,y,tgt[2]-L],[x,y,tgt[2]+L],CB,w,a);
+for(let zi=Math.ceil((tgt[2]-L)/sp)*sp;zi<=tgt[2]+L;zi+=sp)head([x,y,zi-.5],[x,y,zi],CB,w,a,6)}}
+if(show.T&&trail.length>1){for(let i=1;i<trail.length;i++)seg(trail[i-1],trail[i],CT,1.8,i/trail.length)}
+const p=P(X);ctx.globalAlpha=1;ctx.fillStyle=CT;ctx.beginPath();ctx.arc(p[0],p[1],7*p[2],0,6.2832);ctx.fill();
+ctx.fillStyle=tc;ctx.font='11px sans-serif';ctx.fillText('e⁻',p[0]-18,p[1]+18);
+if(show.V){const F=force();vec(V,Math.min(0.9*len(V),2.2),CV,'v');vec(F,Math.min(0.9*len(F),2.2),CF,'F');
+if(f.E[0]>0.01)vec([1,0,0],0.5+0.4*f.E[0],CE,'E');
+if(f.B[2]>0.01)vec([0,0,1],0.5+0.4*f.B[2],CB,'B')}
+const o=[38,H-38];[['x',[1,0,0]],['y',[0,1,0]],['z',[0,0,1]]].forEach(a=>{const q=rot(a[1][0],a[1][1],a[1][2]);const ex=o[0]+q[0]*22,ey=o[1]-q[1]*22;ctx.globalAlpha=.7;ctx.strokeStyle=tc;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(o[0],o[1]);ctx.lineTo(ex,ey);ctx.stroke();ctx.fillStyle=tc;ctx.font='11px sans-serif';ctx.fillText(a[0],ex+(ex>o[0]?3:-9),ey+4)});
+ctx.globalAlpha=1}
+function loop(now){
+const dt=Math.min((now-last)/1000,0.05);last=now;
+if(playing){const sd=dt*val('sp');const n=Math.max(1,Math.ceil(sd/0.004));for(let i=0;i<n;i++)step(sd/n);trail.push(X.slice());if(trail.length>1200)trail.shift()}
+for(let i=0;i<3;i++)tgt[i]+=(X[i]-tgt[i])*0.12;
+draw();
+if(++fc%6===0)$('ro').textContent='t '+T.toFixed(1)+'  |v| '+len(V).toFixed(2)+'  |F| '+len(force()).toFixed(2);
+requestAnimationFrame(loop)}
+function labels(){$('eo').textContent=val('e').toFixed(1);$('bo').textContent=val('b').toFixed(1);$('vpo').textContent=val('vp').toFixed(1);$('vzo').textContent=val('vz').toFixed(1);$('spo').textContent=val('sp').toFixed(2)}
+['e','b','sp'].forEach(id=>$(id).addEventListener('input',labels));
+['vp','vz'].forEach(id=>$(id).addEventListener('input',()=>{labels();reset()}));
+const presets={vac:[0,0,0,0],e:[1.2,0,0,0],b:[0,1.5,1,0],eb:[1,1.5,0,0]};
+document.querySelectorAll('[data-p]').forEach(btn=>btn.addEventListener('click',()=>{const v=presets[btn.dataset.p];$('e').value=v[0];$('b').value=v[1];$('vp').value=v[2];$('vz').value=v[3];labels();reset()}));
+function chipStyle(c){const on=show[c.dataset.k];c.style.background=on?'var(--accent-bg)':'';c.style.color=on?'var(--accent-text)':'';c.style.borderColor=on?'var(--accent-border)':''}
+document.querySelectorAll('.chip').forEach(c=>{chipStyle(c);c.addEventListener('click',()=>{show[c.dataset.k]=!show[c.dataset.k];chipStyle(c)})});
+$('play').addEventListener('click',()=>{playing=!playing;$('play').textContent=playing?'Pause':'Play'});
+$('rs').addEventListener('click',reset);
+let drag=null;
+cv.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing'});
+cv.addEventListener('pointermove',e=>{if(!drag)return;yaw+=(e.clientX-drag[0])*0.01;pitch=Math.max(-1.4,Math.min(1.4,pitch+(e.clientY-drag[1])*0.01));drag=[e.clientX,e.clientY]});
+cv.addEventListener('pointerup',()=>{drag=null;cv.style.cursor='grab'});
+labels();reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
