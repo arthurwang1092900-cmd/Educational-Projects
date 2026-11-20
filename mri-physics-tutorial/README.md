@@ -10,4 +10,4 @@ A 3D, three-screen Python tutorial (34 steps, 14 phases): scanner anatomy, B0 an
 
 Keys: Space pause/play, Right/Left step, Shift+Right/Left phase, 1-4 camera views, mouse to rotate and zoom.
 
-`MRI_Physics_Lesson_Summaries.docx` holds the written lesson summaries (Lesson 1 so far).
+`MRI_Physics_Topic_Summary.docx` is a topic-organized summary of lessons 1-20 with clickable links.
